@@ -1,73 +1,130 @@
 // ==UserScript==
 // @name         Github commits最后一页
 // @namespace    http://tampermonkey.net/
-// @version      0.3
+// @version      0.4
 // @description  This will help users get a button to click to end of the github commits page.
 // @author       Mutu
 // @match        https://github.com/*
 // @icon         https://www.google.com/s2/favicons?sz=64&domain=github.com
 // @grant        none
 // @license      MIT
-// @downloadURL https://update.greasyfork.org/scripts/470176/Github%20commits%E6%9C%80%E5%90%8E%E4%B8%80%E9%A1%B5.user.js
-// @updateURL https://update.greasyfork.org/scripts/470176/Github%20commits%E6%9C%80%E5%90%8E%E4%B8%80%E9%A1%B5.meta.js
 // ==/UserScript==
 
 (function () {
     'use strict';
-    let reg = new RegExp("\/commits\/")
-    var isInsert = false
-    var timer = setInterval(() => {
-        if (isInsert) {
-            if (reg.test(window.location.pathname)) {
-            } else {
-                getCommits()
-                isInsert = false
-            }
-        } else {
-            if (reg.test(window.location.pathname)) {
-                insertBtn()
-                isInsert = true
-            } else {
-                getCommits()
-            }
-        }
-    }, 1000);
 
-    function getCommits() {
-        let commitsEl = document.querySelector("a.fgColor-default span") || document.querySelector("a[href*='/commits/'] span");
-        if (commitsEl) {
-            let commitsStr = commitsEl.innerText.replace(/[^0-9]/g, "");
-            sessionStorage.setItem("commits", commitsStr)
-            console.log('[Github-Commits-End] Found commits:', commitsStr)
-        } else {
-            console.log('[Github-Commits-End] Fail to find out commit number')
+    const SELECTORS = {
+        COMMIT_COUNT: 'a.fgColor-default span, a[href*="/commits/"] span, .NumbersSummary-item a[href*="/commits/"] strong',
+        NEXT_BTN: 'a[aria-label="Next Page"]',
+        NAV_BAR: 'nav[aria-label="Pagination"]'
+    };
+
+    let totalCommits = sessionStorage.getItem("commits");
+    let lastUrl = location.href;
+
+    function log(...args) {
+        console.log('[Github-Commits-End]', ...args);
+    }
+
+    async function fetchCommitCount() {
+        try {
+            const repoUrl = window.location.pathname.split('/commits/')[0];
+            log('Fetching commit count from:', repoUrl);
+            const response = await fetch(repoUrl);
+            const html = await response.text();
+            const parser = new DOMParser();
+            const doc = parser.parseFromString(html, 'text/html');
+            const commitsEl = doc.querySelector(SELECTORS.COMMIT_COUNT);
+            if (commitsEl) {
+                const count = commitsEl.innerText.replace(/[^0-9]/g, "");
+                sessionStorage.setItem("commits", count);
+                totalCommits = count;
+                log('Fetched count from home:', count);
+                return count;
+            }
+        } catch (e) {
+            log('Error fetching count:', e);
+        }
+        return null;
+    }
+
+    async function runLogic() {
+        if (!window.location.pathname.includes('/commits/')) {
+            const el = document.querySelector(SELECTORS.COMMIT_COUNT);
+            if (el) {
+                let count = el.innerText.replace(/[^0-9]/g, "");
+                if (count && count !== totalCommits) {
+                    totalCommits = count;
+                    sessionStorage.setItem("commits", totalCommits);
+                    log('Updated count from current page:', totalCommits);
+                }
+            }
+            return;
+        }
+
+        // On commits page
+        if (!totalCommits || totalCommits === "undefined") {
+            totalCommits = await fetchCommitCount();
+        }
+
+        if (totalCommits && totalCommits !== "undefined") {
+            insertBtn();
         }
     }
 
     function insertBtn() {
-        let commitsStr = sessionStorage.getItem("commits")
-        if (!commitsStr) return;
+        if (document.getElementById('click-to-end-btn')) return;
 
-        let btnToNext = document.querySelector('a[aria-label="Next Page"]')
-        if (!btnToNext) return;
+        const nextBtn = document.querySelector(SELECTORS.NEXT_BTN);
+        if (!nextBtn) return;
 
-        // Avoid duplicate insertion
-        if (document.querySelector('#click-to-end-btn')) return;
+        const navBar = document.querySelector(SELECTORS.NAV_BAR);
+        if (!navBar) return;
 
-        let btnGroup = btnToNext.parentNode
-        let btnToEnd = document.createElement('a')
+        const btnToEnd = document.createElement('a');
 
-        // Copy classes and styles
-        btnToNext.classList.forEach(cls => btnToEnd.classList.add(cls));
-        btnToEnd.id = 'click-to-end-btn'
-        btnToEnd.style.marginLeft = '8px'; // Add some spacing
+        // Copy standard classes
+        nextBtn.classList.forEach(cls => btnToEnd.classList.add(cls));
+        btnToEnd.id = 'click-to-end-btn';
+        btnToEnd.innerText = "Click To End";
 
-        let commitsNum = parseInt(commitsStr, 10)
-        // Adjust the offset to go to the very end
-        btnToEnd.href = btnToNext.href.replace(/\+\d+/g, `+${commitsNum - 35}`)
-        btnToEnd.innerText = "Click To End"
+        // Styling to avoid 'crowding' and maintain layout
+        btnToEnd.style.display = 'inline-flex';
+        btnToEnd.style.alignItems = 'center';
+        btnToEnd.style.marginLeft = '12px';
+        btnToEnd.style.paddingLeft = '12px';
+        btnToEnd.style.paddingRight = '12px';
+        btnToEnd.style.border = '1px solid var(--color-border-default, #d0d7de)';
+        btnToEnd.style.borderRadius = '6px';
+        btnToEnd.style.color = 'var(--color-accent-fg, #0969da)';
+        btnToEnd.style.fontSize = '14px';
+        btnToEnd.style.textDecoration = 'none';
 
-        btnGroup.appendChild(btnToEnd)
-        console.log('[Github-Commits-End] Button inserted');
+        const commitsNum = parseInt(totalCommits, 10);
+        // Robust regex replacement for after parameter
+        if (nextBtn.href.includes('+')) {
+            btnToEnd.href = nextBtn.href.replace(/\+\d+/, `+${commitsNum - 35}`);
+        } else {
+            btnToEnd.href = nextBtn.href + `+${commitsNum - 35}`;
+        }
+
+        // Insert after the next button
+        navBar.insertAdjacentElement('beforeend', btnToEnd);
+        log('Button inserted successfully');
     }
+
+    // Handle soft navigations and DOM updates
+    const observer = new MutationObserver(() => {
+        if (location.href !== lastUrl) {
+            lastUrl = location.href;
+            runLogic();
+        } else if (window.location.pathname.includes('/commits/') && !document.getElementById('click-to-end-btn')) {
+            runLogic();
+        }
+    });
+
+    observer.observe(document.body, { childList: true, subtree: true });
+
+    // Initial execution
+    runLogic();
 })();
