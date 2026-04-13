@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Github commits最后一页
 // @namespace    http://tampermonkey.net/
-// @version      0.2
+// @version      0.3
 // @description  This will help users get a button to click to end of the github commits page.
 // @author       Mutu
 // @match        https://github.com/*
@@ -34,24 +34,40 @@
     }, 1000);
 
     function getCommits() {
-        if (document.querySelector("span .fgColor-default")) {
-            let commits = document.querySelector("span .fgColor-default").innerText
-            sessionStorage.setItem("commits", commits)
-            console.log(commits)
+        let commitsEl = document.querySelector("a.fgColor-default span") || document.querySelector("a[href*='/commits/'] span");
+        if (commitsEl) {
+            let commitsStr = commitsEl.innerText.replace(/[^0-9]/g, "");
+            sessionStorage.setItem("commits", commitsStr)
+            console.log('[Github-Commits-End] Found commits:', commitsStr)
         } else {
-            console.log('Fail to find out commit number')
+            console.log('[Github-Commits-End] Fail to find out commit number')
         }
     }
 
     function insertBtn() {
         let commitsStr = sessionStorage.getItem("commits")
-        let btnToNext = document.querySelector('a[data-testid=pagination-next-button]')
-        let btnGroup = btnToNext.parentNode.parentNode
+        if (!commitsStr) return;
+
+        let btnToNext = document.querySelector('a[aria-label="Next Page"]')
+        if (!btnToNext) return;
+
+        // Avoid duplicate insertion
+        if (document.querySelector('#click-to-end-btn')) return;
+
+        let btnGroup = btnToNext.parentNode
         let btnToEnd = document.createElement('a')
-        btnToEnd.className = btnToNext.classList
-        let commitsNum = parseInt(commitsStr.replace(/,/, ""), 10)
-        btnToEnd.href = btnToNext.href.replace(/\+\d+/g, `+${commitsNum - 34}`)
+
+        // Copy classes and styles
+        btnToNext.classList.forEach(cls => btnToEnd.classList.add(cls));
+        btnToEnd.id = 'click-to-end-btn'
+        btnToEnd.style.marginLeft = '8px'; // Add some spacing
+
+        let commitsNum = parseInt(commitsStr, 10)
+        // Adjust the offset to go to the very end
+        btnToEnd.href = btnToNext.href.replace(/\+\d+/g, `+${commitsNum - 35}`)
         btnToEnd.innerText = "Click To End"
+
         btnGroup.appendChild(btnToEnd)
+        console.log('[Github-Commits-End] Button inserted');
     }
 })();
